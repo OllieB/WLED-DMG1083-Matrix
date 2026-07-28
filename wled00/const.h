@@ -381,6 +381,12 @@ static_assert(WLED_MAX_BUSSES <= 32, "WLED_MAX_BUSSES exceeds hard limit");
 #define TYPE_HUB75MATRIX_QS      66
 #define TYPE_HUB75MATRIX_MAX     71
 
+// DMG1083 78x78 MBI5153 PWM matrix panel - fixed single-board pinout (see mbi5153matrix_bridge.h),
+// so unlike HUB75 there is no panel-size/chain-length variant to select, hence a single ID.
+#define TYPE_MBI5153MATRIX_MIN   72
+#define TYPE_MBI5153MATRIX       72
+#define TYPE_MBI5153MATRIX_MAX   72
+
 //Network types (master broadcast) (80-95)
 #define TYPE_VIRTUAL_MIN         80
 #define TYPE_NET_DDP_RGB         80            //network DDP RGB bus (master broadcast bus)

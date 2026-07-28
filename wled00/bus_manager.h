@@ -9,6 +9,10 @@
 #include "src/dependencies/fastled_slim/fastled_slim.h"
 
 #endif
+
+#ifdef WLED_ENABLE_MBI5153MATRIX
+#include "src/dependencies/mbi5153matrix/mbi5153matrix_bridge.h"
+#endif
 /*
  * Class for addressing various light types
  */
@@ -171,7 +175,7 @@ class Bus {
     inline  bool     containsPixel(uint16_t pix) const          { return pix >= _start && pix < _start + _len; }
 
     static inline std::vector<LEDType> getLEDTypes()            { return {{TYPE_NONE, "", PSTR("None")}}; } // not used. just for reference for derived classes
-    static constexpr size_t   getNumberOfPins(uint8_t type)     { return isVirtual(type) ? 4 : isPWM(type) ? numPWMPins(type) : isHub75(type) ? 5 : is2Pin(type) + 1; } // credit @PaoloTK; for HUB75 the 5 slots store config params (panelW, panelH, chain, rows, cols), not GPIO pins
+    static constexpr size_t   getNumberOfPins(uint8_t type)     { return isVirtual(type) ? 4 : isPWM(type) ? numPWMPins(type) : isHub75(type) ? 5 : isMbi5153(type) ? 0 : is2Pin(type) + 1; } // credit @PaoloTK; for HUB75 the 5 slots store config params (panelW, panelH, chain, rows, cols), not GPIO pins. MBI5153 panel is a single fixed-pinout board, nothing to configure.
     static constexpr size_t   getNumberOfChannels(uint8_t type) { return hasWhite(type) + 3*hasRGB(type) + hasCCT(type); }
     static constexpr bool hasRGB(uint8_t type) {
       return !((type >= TYPE_WS2812_1CH && type <= TYPE_WS2812_WWA) || type == TYPE_ANALOG_1CH || type == TYPE_ANALOG_2CH || type == TYPE_ONOFF);
@@ -195,6 +199,7 @@ class Bus {
     static constexpr bool  isPWM(uint8_t type)        { return (type >= TYPE_ANALOG_MIN && type <= TYPE_ANALOG_MAX); }
     static constexpr bool  isVirtual(uint8_t type)    { return (type >= TYPE_VIRTUAL_MIN && type <= TYPE_VIRTUAL_MAX); }
     static constexpr bool  isHub75(uint8_t type)      { return (type >= TYPE_HUB75MATRIX_MIN && type <= TYPE_HUB75MATRIX_MAX); }
+    static constexpr bool  isMbi5153(uint8_t type)    { return (type >= TYPE_MBI5153MATRIX_MIN && type <= TYPE_MBI5153MATRIX_MAX); }
     static constexpr bool  is16bit(uint8_t type)      { return type == TYPE_UCS8903 || type == TYPE_UCS8904 || type == TYPE_SM16825; }
     static constexpr bool  mustRefresh(uint8_t type)  { return type == TYPE_TM1814; }
     static constexpr int   numPWMPins(uint8_t type)   { return (type - 40); }
@@ -448,6 +453,38 @@ class BusHub75Matrix : public Bus {
     static constexpr uint32_t IS_BLACK = 0x000000u;
     static constexpr uint32_t IS_DARKGREY = 0x333333u;
     static constexpr int PIN_COUNT = 14;
+};
+#endif
+
+#ifdef WLED_ENABLE_MBI5153MATRIX
+// DMG1083 78x78 MBI5153 PWM matrix panel. Unlike BusHub75Matrix this wraps a fixed, hardcoded
+// single-board pinout (see mbi5153matrix_bridge.h/PINS) via a CRGB-free bridge, rather than
+// talking to the vendored driver directly - see mbi5153matrix_bridge.h for why.
+class BusMbi5153Matrix : public Bus {
+  public:
+    BusMbi5153Matrix(const BusConfig &bc);
+    [[gnu::hot]] void setPixelColor(unsigned pix, uint32_t c) override;
+    [[gnu::hot]] uint32_t getPixelColor(unsigned pix) const override;
+    void show() override;
+    void setBrightness(uint8_t b) override;
+    size_t getPins(uint8_t* pinArray = nullptr) const override;
+    void cleanup();
+
+    ~BusMbi5153Matrix() {
+      cleanup();
+    }
+
+    static std::vector<LEDType> getLEDTypes(void);
+
+  private:
+    unsigned _panelWidth = 0; // cached Mbi5153Bridge::WIDTH, 0 if init failed
+    // Bit-per-pixel "was this pixel last shown as non-black" flag, mirroring BusHub75Matrix's
+    // approach: the panel driver itself already retains the previously-pushed frame (see
+    // matrix.setImagePersistence(true) in mbi5153matrix_bridge.cpp), so getPixelColor() can only
+    // report black-vs-"was lit", not the exact last color, same tradeoff HUB75 makes here.
+    byte *_ledsDirty = nullptr;
+    static constexpr uint32_t IS_BLACK = 0x000000u;
+    static constexpr uint32_t IS_DARKGREY = 0x333333u;
 };
 #endif
 

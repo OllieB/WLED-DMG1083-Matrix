@@ -30,8 +30,10 @@ static constexpr bool validatePinsAndTypes(const unsigned* types, unsigned numTy
   // Pins provided < pins required -> always invalid
   // Pins provided = pins required -> always valid
   // Pins provided > pins required -> valid if excess pins are a product of last type pins since it will be repeated
-  // HUB75 types use their pin slots for config params, not GPIO - skip GPIO pin validation for them
-  return Bus::isHub75(types[numTypes-1]) ? true :
+  // HUB75 types use their pin slots for config params, not GPIO - skip GPIO pin validation for them.
+  // MBI5153 matrix has a fixed, hardcoded pinout and reports 0 pin slots - must also be skipped
+  // here, otherwise the modulo below divides by zero.
+  return (Bus::isHub75(types[numTypes-1]) || Bus::isMbi5153(types[numTypes-1])) ? true :
          (sumPinsRequired(types, numTypes) > numPins) ? false :
          (numPins - sumPinsRequired(types, numTypes)) % Bus::getNumberOfPins(types[numTypes-1]) == 0;
 }

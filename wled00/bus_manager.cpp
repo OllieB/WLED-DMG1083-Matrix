@@ -1242,6 +1242,104 @@ size_t BusHub75Matrix::getPins(uint8_t* pinArray) const {
 #endif
 // ***************************************************************************
 
+#ifdef WLED_ENABLE_MBI5153MATRIX
+BusMbi5153Matrix::BusMbi5153Matrix(const BusConfig &bc) : Bus(bc.type, bc.start, bc.autoWhite) {
+  _valid = false;
+  _hasRgb = true;
+  _hasWhite = false;
+
+  int8_t pins[Mbi5153Bridge::PIN_COUNT];
+  for (size_t i = 0; i < Mbi5153Bridge::PIN_COUNT; i++) pins[i] = (int8_t)Mbi5153Bridge::PINS[i];
+  if (!PinManager::allocateMultiplePins(pins, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153, true)) {
+    DEBUGBUS_PRINTLN("Failed to allocate pins for MBI5153 matrix");
+    return;
+  }
+
+  if (!Mbi5153Bridge::begin()) {
+    DEBUGBUS_PRINTLN("MBI5153 matrix driver init failed");
+    PinManager::deallocateMultiplePins(pins, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
+    return;
+  }
+
+  this->_len = Mbi5153Bridge::WIDTH * Mbi5153Bridge::HEIGHT;
+  _panelWidth = Mbi5153Bridge::WIDTH;
+
+  _ledsDirty = (byte*) d_malloc(getBitArrayBytes(_len)); // "was this pixel last shown as non-black" bits
+  if (_ledsDirty == nullptr) {
+    DEBUGBUS_PRINTLN("MBI5153 matrix: not enough memory for dirty bits");
+    PinManager::deallocateMultiplePins(pins, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
+    return;
+  }
+  setBitArray(_ledsDirty, _len, false);
+
+  _valid = true;
+  DEBUGBUS_PRINTF("MBI5153 matrix started, width=%u, %u pixels.\n", _panelWidth, _len);
+}
+
+void IRAM_ATTR BusMbi5153Matrix::setPixelColor(unsigned pix, uint32_t c) {
+  if (!_valid) return; // note: no need to check pix >= _len as that is checked in containsPixel()
+
+  if ((c == IS_BLACK) && (getBitFromArray(_ledsDirty, pix) == false)) return; // ignore black if pixel is already black
+  setBitInArray(_ledsDirty, pix, c != IS_BLACK);                              // dirty = true means "color is not BLACK"
+
+  unsigned x = pix % _panelWidth;
+  unsigned y = pix / _panelWidth;
+  Mbi5153Bridge::setPixel(x, y, R(c), G(c), B(c));
+}
+
+uint32_t BusMbi5153Matrix::getPixelColor(unsigned pix) const {
+  if (!_valid) return IS_BLACK; // note: no need to check pix >= _len as that is checked in containsPixel()
+  return getBitFromArray(_ledsDirty, pix) ? IS_DARKGREY : IS_BLACK; // just a hack - we only know if the pixel is black or not (same tradeoff as BusHub75Matrix)
+}
+
+void BusMbi5153Matrix::setBrightness(uint8_t b) {
+  _bri = b;
+  if (!_valid) return;
+  // WLED's 0-255 slider scales colors before setPixelColor() is even called (applied to the
+  // segment buffer), so nothing further to apply here in the common case. The MBI5153's own
+  // 0-63 LED drive-current register is a hardware current-limit setting, not a dimmer - it's
+  // left at its build-time default (see mbi5153matrix_bridge.cpp) rather than being driven by
+  // this slider, since sweeping drive current with brightness would also sweep panel heat/current
+  // draw in a way the WLED brightness UI doesn't expect. Call Mbi5153Bridge::setDriveCurrent()
+  // directly (e.g. from a usermod) if you want that instead.
+}
+
+void BusMbi5153Matrix::show() {
+  if (!_valid) return;
+  Mbi5153Bridge::show();
+}
+
+void BusMbi5153Matrix::cleanup() {
+  // Note: the vendored driver has no DMA teardown/restart path (unlike BusHub75Matrix's
+  // display->stopDMAoutput()), so removing/reconfiguring this bus at runtime cannot actually
+  // stop the panel output - only pin bookkeeping is released here.
+  _valid = false;
+  int8_t pins[Mbi5153Bridge::PIN_COUNT];
+  for (size_t i = 0; i < Mbi5153Bridge::PIN_COUNT; i++) pins[i] = (int8_t)Mbi5153Bridge::PINS[i];
+  PinManager::deallocateMultiplePins(pins, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
+  if (_ledsDirty != nullptr) { d_free(_ledsDirty); _ledsDirty = nullptr; }
+  _panelWidth = 0;
+}
+
+std::vector<LEDType> BusMbi5153Matrix::getLEDTypes() {
+  // NOTE: tag deliberately does NOT reuse HUB75's "H" tag - settings_leds.htm's isHub75(t) JS
+  // special-cases that tag to render/require 5 panel-geometry fields (width/height/chain/rows/cols)
+  // and a "rows*cols==panels" validation check, none of which apply to this fixed-pinout board.
+  // Using "" (as BusOnOff does) avoids that, at the cost of the settings UI still showing one
+  // unused/harmless pin-selector dropdown, since its client-side "how many pin fields" formula
+  // has no way to represent zero. A proper fix needs a dedicated isMbi5153(t) branch in
+  // settings_leds.htm mirroring the isHub75(t) ones - not yet done, see summary.
+  return {
+    {TYPE_MBI5153MATRIX, "", PSTR("MBI5153 Matrix (DMG1083 78x78)")},
+  };
+}
+
+size_t BusMbi5153Matrix::getPins(uint8_t* pinArray) const {
+  return 0; // fixed single-board pinout, nothing to report/configure
+}
+#endif
+// ***************************************************************************
+
 BusPlaceholder::BusPlaceholder(const BusConfig &bc)
 : Bus(bc.type, bc.start, bc.autoWhite, bc.count, bc.reversed, bc.refreshReq)
 , _colorOrder(bc.colorOrder)
@@ -1300,6 +1398,10 @@ int BusManager::add(const BusConfig &bc, bool placeholder) {
   } else if (Bus::isHub75(bc.type)) {
     busses.push_back(make_unique<BusHub75Matrix>(bc));
 #endif
+#ifdef WLED_ENABLE_MBI5153MATRIX
+  } else if (Bus::isMbi5153(bc.type)) {
+    busses.push_back(make_unique<BusMbi5153Matrix>(bc));
+#endif
   } else if (Bus::isDigital(bc.type)) {
     busses.push_back(make_unique<BusDigital>(bc));
   } else if (Bus::isOnOff(bc.type)) {
@@ -1333,6 +1435,9 @@ String BusManager::getLEDTypesJSONString() {
   //json += LEDTypesToJson(BusVirtual::getLEDTypes());
   #ifdef WLED_ENABLE_HUB75MATRIX
   json += LEDTypesToJson(BusHub75Matrix::getLEDTypes());
+  #endif
+  #ifdef WLED_ENABLE_MBI5153MATRIX
+  json += LEDTypesToJson(BusMbi5153Matrix::getLEDTypes());
   #endif
 
   json.setCharAt(json.length()-1, ']'); // replace last comma with bracket
