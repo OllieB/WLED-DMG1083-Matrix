@@ -1247,6 +1247,8 @@ BusMbi5153Matrix::BusMbi5153Matrix(const BusConfig &bc) : Bus(bc.type, bc.start,
   _valid = false;
   _hasRgb = true;
   _hasWhite = false;
+  _milliAmpsPerLed = bc.milliAmpsPerLed;
+  _milliAmpsMax    = bc.milliAmpsMax;
 
   int8_t pins[Mbi5153Bridge::PIN_COUNT];
   for (size_t i = 0; i < Mbi5153Bridge::PIN_COUNT; i++) pins[i] = (int8_t)Mbi5153Bridge::PINS[i];
@@ -1265,12 +1267,16 @@ BusMbi5153Matrix::BusMbi5153Matrix(const BusConfig &bc) : Bus(bc.type, bc.start,
   _panelWidth = Mbi5153Bridge::WIDTH;
 
   _ledsDirty = (byte*) d_malloc(getBitArrayBytes(_len)); // "was this pixel last shown as non-black" bits
-  if (_ledsDirty == nullptr) {
-    DEBUGBUS_PRINTLN("MBI5153 matrix: not enough memory for dirty bits");
+  _rgb       = (uint8_t*) d_malloc(_len * 3);            // shadow buffer for deferred ABL scaling, see show()
+  if (_ledsDirty == nullptr || _rgb == nullptr) {
+    DEBUGBUS_PRINTLN("MBI5153 matrix: not enough memory for pixel buffers");
     PinManager::deallocateMultiplePins(Mbi5153Bridge::PINS, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
+    if (_ledsDirty != nullptr) { d_free(_ledsDirty); _ledsDirty = nullptr; }
+    if (_rgb       != nullptr) { d_free(_rgb);       _rgb       = nullptr; }
     return;
   }
   setBitArray(_ledsDirty, _len, false);
+  memset(_rgb, 0, _len * 3);
 
   _valid = true;
   DEBUGBUS_PRINTF("MBI5153 matrix started, width=%u, %u pixels.\n", _panelWidth, _len);
@@ -1279,12 +1285,22 @@ BusMbi5153Matrix::BusMbi5153Matrix(const BusConfig &bc) : Bus(bc.type, bc.start,
 void IRAM_ATTR BusMbi5153Matrix::setPixelColor(unsigned pix, uint32_t c) {
   if (!_valid) return; // note: no need to check pix >= _len as that is checked in containsPixel()
 
-  if ((c == IS_BLACK) && (getBitFromArray(_ledsDirty, pix) == false)) return; // ignore black if pixel is already black
-  setBitInArray(_ledsDirty, pix, c != IS_BLACK);                              // dirty = true means "color is not BLACK"
+  c = color_fade(c, _bri, true); // apply WLED's global brightness (BusDigital does this in its own setPixelColor() too)
+  uint8_t r = R(c), g = G(c), b = B(c);
 
-  unsigned x = pix % _panelWidth;
-  unsigned y = pix / _panelWidth;
-  Mbi5153Bridge::setPixel(x, y, R(c), G(c), B(c));
+  if (BusManager::_useABL) _colorSum += r + g + b; // fed to estimateCurrent() once per frame, see BusManager::applyABL()
+
+  bool nonBlack = (r || g || b);
+  if (!nonBlack && getBitFromArray(_ledsDirty, pix) == false) return; // ignore black if pixel is already black
+  setBitInArray(_ledsDirty, pix, nonBlack);                           // dirty = true means "color is not BLACK"
+
+  // Deferred write: buffer the (already _bri-scaled) requested color rather than pushing to the
+  // panel driver immediately. show() applies whatever ABL decided (_NPBbri) to this buffer in one
+  // pass right before the real Mbi5153Bridge::setPixel() calls - see the class comment in
+  // bus_manager.h for why (no cheap way to read back and rescale Matrix's own packed PWM buffer).
+  _rgb[pix*3+0] = r;
+  _rgb[pix*3+1] = g;
+  _rgb[pix*3+2] = b;
 }
 
 uint32_t BusMbi5153Matrix::getPixelColor(unsigned pix) const {
@@ -1294,17 +1310,52 @@ uint32_t BusMbi5153Matrix::getPixelColor(unsigned pix) const {
 
 void BusMbi5153Matrix::setBrightness(uint8_t b) {
   _bri = b;
-  if (!_valid) return;
-  // WLED's 0-255 slider scales colors before setPixelColor() is even called (applied to the
-  // segment buffer), so nothing further to apply here. The MBI5153's own 0-63 LED drive-current
-  // register is a hardware current-limit setting, not a dimmer - it's left at its build-time
-  // default (see Matrix::setBrightness() in Matrix.cpp) rather than being driven by this slider,
-  // since sweeping drive current with brightness would also sweep panel heat/current draw in a
-  // way the WLED brightness UI doesn't expect.
+  // Actual scaling happens per-pixel in setPixelColor() (like BusDigital) - nothing to push to
+  // hardware here. The MBI5153's own 0-63 LED drive-current register is a separate, hardware
+  // current-limit setting, not a dimmer - it's left at its build-time default (see
+  // Matrix::setBrightness() in Matrix.cpp) rather than being driven by this slider or by ABL,
+  // since sweeping drive current would also sweep panel heat/max-current-draw in a way neither
+  // the WLED brightness UI nor ABL expect. ABL protects the PSU instead by scaling color values
+  // (same mechanism as this slider) down to a configured current budget - see estimateCurrent()/
+  // applyBriLimit() and BusManager::applyABL().
+}
+
+void BusMbi5153Matrix::estimateCurrent() {
+  // Mirrors BusDigital::estimateCurrent(); no white channel here, so always 3*255 units/channel.
+  _milliAmpsTotal = ((uint64_t)_colorSum * _milliAmpsPerLed) / (3*255) + getLength(); // +~1mA standby/pixel estimate
+}
+
+void BusMbi5153Matrix::applyBriLimit(uint8_t newBri) {
+  // Mirrors BusDigital::applyBriLimit(), adapted for a shadow-buffer bus: this only decides
+  // _NPBbri (the scale ABL wants applied) - the actual per-pixel rescale happens once in show(),
+  // against the buffered colors, rather than rewriting an already-pushed hardware buffer in place.
+  _NPBbri = 255;
+  if (newBri == 0) {
+    if (_milliAmpsLimit == 0 || _milliAmpsTotal == 0) { _colorSum = 0; return; } // ABL not used for this bus
+    newBri = 255;
+    if (_milliAmpsLimit > getLength()) { // each pixel uses about 1mA in standby, per estimateCurrent()
+      if (_milliAmpsTotal > _milliAmpsLimit) {
+        newBri = ((uint32_t)_milliAmpsLimit * 255) / _milliAmpsTotal + 1; // +1 to avoid 0 brightness
+        _milliAmpsTotal = _milliAmpsLimit;
+      }
+    } else {
+      newBri = 1; // limit too low, set brightness to minimum
+      _milliAmpsTotal = getLength(); // estimate bus current as minimum
+    }
+  }
+  _NPBbri = newBri;
+  _colorSum = 0; // reset for next frame
 }
 
 void BusMbi5153Matrix::show() {
   if (!_valid) return;
+  for (unsigned pix = 0; pix < _len; pix++) {
+    uint32_t c = RGBW32(_rgb[pix*3+0], _rgb[pix*3+1], _rgb[pix*3+2], 0);
+    if (_NPBbri < 255) c = color_fade(c, _NPBbri, true); // apply ABL's decided scale for this frame, if any
+    unsigned x = pix % _panelWidth;
+    unsigned y = pix / _panelWidth;
+    Mbi5153Bridge::setPixel(x, y, R(c), G(c), B(c));
+  }
   Mbi5153Bridge::show();
 }
 
@@ -1315,6 +1366,7 @@ void BusMbi5153Matrix::cleanup() {
   _valid = false;
   PinManager::deallocateMultiplePins(Mbi5153Bridge::PINS, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
   if (_ledsDirty != nullptr) { d_free(_ledsDirty); _ledsDirty = nullptr; }
+  if (_rgb       != nullptr) { d_free(_rgb);       _rgb       = nullptr; }
   _panelWidth = 0;
 }
 
@@ -1582,7 +1634,7 @@ void BusManager::initializeABL() {
   if (_gMilliAmpsMax > 0) {
     // check global brightness limit
     for (auto &bus : busses) {
-      if (bus->isDigital() && bus->getLEDCurrent() > 0) {
+      if ((bus->isDigital() || bus->isMbi5153()) && bus->getLEDCurrent() > 0) {
         _useABL = true; // at least one bus has valid LED current
         return;
       }
@@ -1591,7 +1643,7 @@ void BusManager::initializeABL() {
     // check per bus brightness limit
     unsigned numABLbuses = 0;
     for (auto &bus : busses) {
-      if (bus->isDigital() && bus->getLEDCurrent() > 0 && bus->getMaxCurrent() > 0)
+      if ((bus->isDigital() || bus->isMbi5153()) && bus->getLEDCurrent() > 0 && bus->getMaxCurrent() > 0)
         numABLbuses++; // count ABL enabled buses
     }
     if (numABLbuses > 0) {
@@ -1608,6 +1660,22 @@ void BusManager::initializeABL() {
           if (busDemand == 0) busMax = 0; // no LED current set, disable ABL for this bus
           busd.setCurrentLimit(busMax);
         }
+#ifdef WLED_ENABLE_MBI5153MATRIX
+        else if (bus->isMbi5153() && bus->isOk()) {
+          // Same accounting as the isDigital() branch above - BusMbi5153Matrix mirrors
+          // BusDigital's ABL interface (estimateCurrent()/applyBriLimit()/setCurrentLimit()) but
+          // isn't a BusDigital, so it needs its own static_cast branch here, same as the one in
+          // applyABL() below. See bus_manager.h's BusMbi5153Matrix comment for why.
+          BusMbi5153Matrix &busm = static_cast<BusMbi5153Matrix&>(*bus);
+          uint32_t busLength = busm.getLength();
+          uint32_t busDemand = busLength * busm.getLEDCurrent();
+          uint32_t busMax    = busm.getMaxCurrent();
+          if (busMax > ESPshare)  busMax -= ESPshare;
+          if (busMax < busLength) busMax  = busLength;
+          if (busDemand == 0) busMax = 0;
+          busm.setCurrentLimit(busMax);
+        }
+#endif
       }
     }
   }
@@ -1626,6 +1694,16 @@ void BusManager::applyABL() {
         milliAmpsSum += busd.getUsedCurrent();
         totalLEDs += busd.getLength(); // sum total number of LEDs for global Limit
       }
+#ifdef WLED_ENABLE_MBI5153MATRIX
+      else if (bus->isMbi5153() && bus->isOk()) {
+        BusMbi5153Matrix &busm = static_cast<BusMbi5153Matrix&>(*bus);
+        busm.estimateCurrent();
+        if (_gMilliAmpsMax == 0)
+          busm.applyBriLimit(0);
+        milliAmpsSum += busm.getUsedCurrent();
+        totalLEDs += busm.getLength();
+      }
+#endif
     }
     // check global current limit and apply global ABL limit, total current is summed above
     if (_gMilliAmpsMax > 0) {
@@ -1648,6 +1726,13 @@ void BusManager::applyABL() {
           if (busd.getLEDCurrent() > 0)  // skip buses with LED current set to 0
             busd.applyBriLimit(newBri);
         }
+#ifdef WLED_ENABLE_MBI5153MATRIX
+        else if (bus->isMbi5153() && bus->isOk()) {
+          BusMbi5153Matrix &busm = static_cast<BusMbi5153Matrix&>(*bus);
+          if (busm.getLEDCurrent() > 0)
+            busm.applyBriLimit(newBri);
+        }
+#endif
       }
     }
     _gMilliAmpsUsed = milliAmpsSum;

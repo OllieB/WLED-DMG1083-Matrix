@@ -160,6 +160,7 @@ class Bus {
     inline  bool     isPWM() const                              { return isPWM(_type); }
     inline  bool     isVirtual() const                          { return isVirtual(_type); }
     inline  bool     is16bit() const                            { return is16bit(_type); }
+    inline  bool     isMbi5153() const                          { return isMbi5153(_type); } // needed by BusManager::applyABL()/initializeABL()'s bus->isMbi5153() calls - isHub75 never needed this since existing code only ever calls it as Bus::isHub75(type), never bus->isHub75()
     virtual bool     isPlaceholder() const                      { return false; }
     inline  bool     mustRefresh() const                        { return mustRefresh(_type); }
     inline  void     setReversed(bool reversed)                 { _reversed = reversed; }
@@ -480,6 +481,18 @@ class BusMbi5153Matrix : public Bus {
     size_t getPins(uint8_t* pinArray = nullptr) const override;
     void cleanup();
 
+    // ABL (BusManager::initializeABL()/applyABL()) is hardcoded to BusDigital in bus_manager.cpp
+    // (isDigital() + static_cast<BusDigital&>), same as it is upstream - there was never a HUB75/
+    // matrix-type hook to reuse. These mirror BusDigital's own (non-virtual, plain-method) ABL
+    // interface exactly so BusManager can grow parallel isMbi5153()+static_cast branches instead
+    // of restructuring Bus's virtual interface for one bus type.
+    void     estimateCurrent(); // sums _colorSum (already _bri-scaled, see setPixelColor) into _milliAmpsTotal
+    void     applyBriLimit(uint8_t newBri); // 0 = compute per-bus limit from _milliAmpsLimit; else apply given global ABL scale
+    void     setCurrentLimit(uint16_t milliAmps) { _milliAmpsLimit = milliAmps; }
+    uint16_t getLEDCurrent()  const override { return _milliAmpsPerLed; }
+    uint16_t getUsedCurrent() const override { return _milliAmpsTotal; }
+    uint16_t getMaxCurrent()  const override { return _milliAmpsMax; }
+
     ~BusMbi5153Matrix() {
       cleanup();
     }
@@ -495,6 +508,19 @@ class BusMbi5153Matrix : public Bus {
     byte *_ledsDirty = nullptr;
     static constexpr uint32_t IS_BLACK = 0x000000u;
     static constexpr uint32_t IS_DARKGREY = 0x333333u;
+
+    // ABL support. Unlike BusDigital, there's no NeoPixelBus-style buffer we can cheaply read
+    // back and rescale in place once ABL has decided a brightness cap - Matrix's own DMA buffer
+    // is already bit-packed PWM data, not plain RGB. So setPixelColor() writes the requested
+    // (already _bri-scaled) color into this shadow buffer instead of pushing to the panel driver
+    // immediately, and show() applies the final ABL-decided scale (_NPBbri) to the whole buffer
+    // in one pass right before actually pushing pixels out - see setPixelColor()/show().
+    uint8_t  *_rgb = nullptr;             // _len * 3 bytes, RGB per pixel
+    uint32_t  _colorSum = 0;              // running per-frame sum of R+G+B, reset in applyBriLimit()
+    uint32_t  _milliAmpsTotal = 0;        // current-frame estimated current draw, set by estimateCurrent()
+    uint16_t  _milliAmpsLimit = 0;        // per-bus ABL budget, set by BusManager::initializeABL(); 0 = ABL disabled for this bus
+    uint8_t   _milliAmpsPerLed = LED_MILLIAMPS_DEFAULT; // from BusConfig::milliAmpsPerLed (UI: "mA/LED")
+    uint16_t  _milliAmpsMax = ABL_MILLIAMPS_DEFAULT;    // from BusConfig::milliAmpsMax (UI: "PSU mA")
 };
 #endif
 
