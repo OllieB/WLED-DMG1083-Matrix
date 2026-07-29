@@ -51,8 +51,18 @@
 	// Use 'forwardPorts' to make a list of ports inside the container available locally.
 	// "forwardPorts": [],
 
-	// Use 'postCreateCommand' to run commands after the container is created.
-	"postCreateCommand": "",
+	// Persist the PlatformIO package/toolchain cache and the ccache object cache across
+	// container rebuilds - without this, rebuilding the container (not just reopening it)
+	// forces a full toolchain re-download and every build starts from a cold ccache.
+	"mounts": [
+		"source=wled-platformio-cache,target=/home/vscode/.platformio,type=volume",
+		"source=wled-ccache-cache,target=/home/vscode/.cache/ccache,type=volume"
+	],
+
+	// ccache speeds up the PlatformIO edit/rebuild loop (see pio-scripts/ccache.py) -
+	// installed here rather than in the Dockerfile since this devcontainer builds from
+	// the "image" key directly, so the Dockerfile isn't consulted.
+	"postCreateCommand": "sudo apt-get update && sudo apt-get install -y --no-install-recommends ccache",
 
 	// Comment out connect as root instead. More info: https://aka.ms/vscode-remote/containers/non-root.
 	"remoteUser": "vscode"
