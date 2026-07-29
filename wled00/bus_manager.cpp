@@ -1296,12 +1296,11 @@ void BusMbi5153Matrix::setBrightness(uint8_t b) {
   _bri = b;
   if (!_valid) return;
   // WLED's 0-255 slider scales colors before setPixelColor() is even called (applied to the
-  // segment buffer), so nothing further to apply here in the common case. The MBI5153's own
-  // 0-63 LED drive-current register is a hardware current-limit setting, not a dimmer - it's
-  // left at its build-time default (see mbi5153matrix_bridge.cpp) rather than being driven by
-  // this slider, since sweeping drive current with brightness would also sweep panel heat/current
-  // draw in a way the WLED brightness UI doesn't expect. Call Mbi5153Bridge::setDriveCurrent()
-  // directly (e.g. from a usermod) if you want that instead.
+  // segment buffer), so nothing further to apply here. The MBI5153's own 0-63 LED drive-current
+  // register is a hardware current-limit setting, not a dimmer - it's left at its build-time
+  // default (see Matrix::setBrightness() in Matrix.cpp) rather than being driven by this slider,
+  // since sweeping drive current with brightness would also sweep panel heat/current draw in a
+  // way the WLED brightness UI doesn't expect.
 }
 
 void BusMbi5153Matrix::show() {

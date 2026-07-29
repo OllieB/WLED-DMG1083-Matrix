@@ -28,11 +28,6 @@ namespace Mbi5153Bridge {
   // the background SPI-DMA GCLK/address loop. Safe to call once; subsequent calls are no-ops.
   bool begin();
 
-  // Raw MBI5153 LED drive-current register value (0-63, see BRIGHTNESS_* in app_constants.hpp).
-  // This is NOT the same as WLED's 0-255 global brightness slider - see BusMbi5153Matrix::setBrightness
-  // in bus_manager.cpp for how the two are reconciled.
-  void setDriveCurrent(uint8_t level0to63);
-
   void setPixel(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b);
 
   // Pushes the pending frame out over DMA. The MBI5153 chips PWM-refresh autonomously afterward

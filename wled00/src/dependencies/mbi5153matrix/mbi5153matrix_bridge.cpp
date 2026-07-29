@@ -33,11 +33,6 @@ bool begin() {
   return began;
 }
 
-void setDriveCurrent(uint8_t level0to63) {
-  if (!began) return;
-  matrix.setBrightness(level0to63);
-}
-
 void setPixel(uint16_t x, uint16_t y, uint8_t r, uint8_t g, uint8_t b) {
   if (!began) return;
   matrix.drawPixel((uint8_t)x, (uint8_t)y, r, g, b);
