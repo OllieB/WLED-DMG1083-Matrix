@@ -1257,7 +1257,7 @@ BusMbi5153Matrix::BusMbi5153Matrix(const BusConfig &bc) : Bus(bc.type, bc.start,
 
   if (!Mbi5153Bridge::begin()) {
     DEBUGBUS_PRINTLN("MBI5153 matrix driver init failed");
-    PinManager::deallocateMultiplePins(pins, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
+    PinManager::deallocateMultiplePins(Mbi5153Bridge::PINS, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
     return;
   }
 
@@ -1267,7 +1267,7 @@ BusMbi5153Matrix::BusMbi5153Matrix(const BusConfig &bc) : Bus(bc.type, bc.start,
   _ledsDirty = (byte*) d_malloc(getBitArrayBytes(_len)); // "was this pixel last shown as non-black" bits
   if (_ledsDirty == nullptr) {
     DEBUGBUS_PRINTLN("MBI5153 matrix: not enough memory for dirty bits");
-    PinManager::deallocateMultiplePins(pins, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
+    PinManager::deallocateMultiplePins(Mbi5153Bridge::PINS, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
     return;
   }
   setBitArray(_ledsDirty, _len, false);
@@ -1314,9 +1314,7 @@ void BusMbi5153Matrix::cleanup() {
   // display->stopDMAoutput()), so removing/reconfiguring this bus at runtime cannot actually
   // stop the panel output - only pin bookkeeping is released here.
   _valid = false;
-  int8_t pins[Mbi5153Bridge::PIN_COUNT];
-  for (size_t i = 0; i < Mbi5153Bridge::PIN_COUNT; i++) pins[i] = (int8_t)Mbi5153Bridge::PINS[i];
-  PinManager::deallocateMultiplePins(pins, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
+  PinManager::deallocateMultiplePins(Mbi5153Bridge::PINS, Mbi5153Bridge::PIN_COUNT, PinOwner::Mbi5153);
   if (_ledsDirty != nullptr) { d_free(_ledsDirty); _ledsDirty = nullptr; }
   _panelWidth = 0;
 }
