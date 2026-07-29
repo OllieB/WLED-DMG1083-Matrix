@@ -175,7 +175,17 @@ class Bus {
     inline  bool     containsPixel(uint16_t pix) const          { return pix >= _start && pix < _start + _len; }
 
     static inline std::vector<LEDType> getLEDTypes()            { return {{TYPE_NONE, "", PSTR("None")}}; } // not used. just for reference for derived classes
-    static constexpr size_t   getNumberOfPins(uint8_t type)     { return isVirtual(type) ? 4 : isPWM(type) ? numPWMPins(type) : isHub75(type) ? 5 : isMbi5153(type) ? 0 : is2Pin(type) + 1; } // credit @PaoloTK; for HUB75 the 5 slots store config params (panelW, panelH, chain, rows, cols), not GPIO pins. MBI5153 panel is a single fixed-pinout board, nothing to configure.
+    // NOTE: isMbi5153 reports 1, not 0, despite having no real configurable pins. cfg.cpp's
+    // "no cfg.json yet" default-bus generator (~line 283) uses getNumberOfPins() to know how
+    // many DATA_PINS slots each default bus consumes, and stops once they're exhausted - with
+    // 0 here, `pinsIndex` never advances, its `pinsIndex + busPins > defNumPins` termination
+    // check is never true, and it silently keeps generating buses for all WLED_MAX_BUSSES
+    // iterations (one MBI5153 bus per slot). 1 pin exactly matches DATA_PINS' single-element
+    // default (DEFAULT_LED_PIN), so exactly one bus gets created. The dummy pin value that
+    // flows into BusConfig::pins[0] as a side effect is never actually used - see
+    // BusMbi5153Matrix's constructor, which allocates its real 22 GPIOs from
+    // Mbi5153Bridge::PINS, not from bc.pins.
+    static constexpr size_t   getNumberOfPins(uint8_t type)     { return isVirtual(type) ? 4 : isPWM(type) ? numPWMPins(type) : isHub75(type) ? 5 : isMbi5153(type) ? 1 : is2Pin(type) + 1; } // credit @PaoloTK; for HUB75 the 5 slots store config params (panelW, panelH, chain, rows, cols), not GPIO pins.
     static constexpr size_t   getNumberOfChannels(uint8_t type) { return hasWhite(type) + 3*hasRGB(type) + hasCCT(type); }
     static constexpr bool hasRGB(uint8_t type) {
       return !((type >= TYPE_WS2812_1CH && type <= TYPE_WS2812_WWA) || type == TYPE_ANALOG_1CH || type == TYPE_ANALOG_2CH || type == TYPE_ONOFF);
