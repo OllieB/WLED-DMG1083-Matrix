@@ -1320,15 +1320,19 @@ void BusMbi5153Matrix::cleanup() {
 }
 
 std::vector<LEDType> BusMbi5153Matrix::getLEDTypes() {
-  // NOTE: tag deliberately does NOT reuse HUB75's "H" tag - settings_leds.htm's isHub75(t) JS
-  // special-cases that tag to render/require 5 panel-geometry fields (width/height/chain/rows/cols)
-  // and a "rows*cols==panels" validation check, none of which apply to this fixed-pinout board.
-  // Using "" (as BusOnOff does) avoids that, at the cost of the settings UI still showing one
-  // unused/harmless pin-selector dropdown, since its client-side "how many pin fields" formula
-  // has no way to represent zero. A proper fix needs a dedicated isMbi5153(t) branch in
-  // settings_leds.htm mirroring the isHub75(t) ones - not yet done, see summary.
+  // NOTE: tag must not collide with any of settings_leds.htm's client-side classifiers:
+  //   - "H" -> isHub75(t): forces 5 panel-geometry fields + a "rows*cols==panels" check, wrong here.
+  //   - ""  -> isAna(t): WRONG, tried this first - it actively forces the LED Count field to 1
+  //            (settings_leds.htm:356 "if (isAna(t)) d.Sf['LC'+n].value = 1;"), which silently
+  //            broke the whole panel (WLED only ever rendered/pushed 1 pixel).
+  //   - "D"/"2P"/"N"/"V", or anything starting with "A" -> isDig/isD2P/isNet/isVir/isPWM.
+  // "M" hits none of those. There is still no dedicated isMbi5153(t) branch, so the settings UI
+  // shows one harmless unused pin-selector dropdown (numPins(t) = tag.length, min 1 - no way to
+  // ask for zero without adding that branch) and the LED Count field is a normal, freely-editable,
+  // unclamped number - it must be set to WIDTH*HEIGHT (6084) by hand in the UI, since (unlike
+  // HUB75) nothing here computes it from panel-geometry fields.
   return {
-    {TYPE_MBI5153MATRIX, "", PSTR("MBI5153 Matrix (DMG1083 78x78)")},
+    {TYPE_MBI5153MATRIX, "M", PSTR("MBI5153 Matrix (DMG1083 78x78)")},
   };
 }
 
