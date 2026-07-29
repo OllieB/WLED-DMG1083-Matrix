@@ -345,6 +345,24 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
       busConfigs.emplace_back(dataType, defPin, start, count, DEFAULT_LED_COLOR_ORDER, false, 0, RGBW_MODE_MANUAL_ONLY, 0, LED_MILLIAMPS_DEFAULT, ABL_MILLIAMPS_DEFAULT, 0); // driver=0 (RMT default)
       doInitBusses = true;  // finalization done in beginStrip()
     }
+    #if defined(WLED_ENABLE_MBI5153MATRIX) && !defined(WLED_DISABLE_2D)
+    // This dedicated build only ever configures one LED type (a native 2D panel), so
+    // unconditionally default the 2D matrix too rather than requiring a manual "2D
+    // Configuration" pass in the UI. 78 = the DMG1083's physical resolution (PANEL_PHY_RES_X/Y
+    // in mbi5153matrix/app_constants.hpp) - kept as a literal here rather than pulling that
+    // driver header into cfg.cpp. All Panel flags default false (bottomStart/rightStart/
+    // vertical/serpentine), i.e. top-left origin, left-to-right, top-to-bottom - this matches
+    // BusMbi5153Matrix::setPixelColor's raster mapping (x = pix % width, y = pix / width)
+    // exactly, so no orientation overrides are needed.
+    strip.isMatrix = true;
+    strip.panel.clear();
+    WS2812FX::Panel p;
+    p.width  = 78;
+    p.height = 78;
+    strip.panel.push_back(p);
+    // setUpMatrix() is not called here (same reason as the JSON-driven path above: WLED::beginStrip()
+    // already does it whenever fromFS==true, which is the only way this branch is reached).
+    #endif
   }
   if (hw_led["rev"] && BusManager::getNumBusses()) BusManager::getBus(0)->setReversed(true); //set 0.11 global reversed setting for first bus
 
