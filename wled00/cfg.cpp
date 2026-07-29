@@ -22,6 +22,17 @@
   #define DEFAULT_LED_COLOR_ORDER COL_ORDER_GRB  //default to GRB
 #endif
 
+#ifdef WLED_ENABLE_MBI5153MATRIX
+  // LED_MILLIAMPS_DEFAULT (55mA) is a WS2812-oriented figure that means nothing for this panel -
+  // see MBI5153_LED_MILLIAMPS_DEFAULT's derivation comment in platformio.ini.
+  #ifndef MBI5153_LED_MILLIAMPS_DEFAULT
+    #define MBI5153_LED_MILLIAMPS_DEFAULT LED_MILLIAMPS_DEFAULT
+  #endif
+  #define DEFAULT_BUS_MILLIAMPS_PER_LED MBI5153_LED_MILLIAMPS_DEFAULT
+#else
+  #define DEFAULT_BUS_MILLIAMPS_PER_LED LED_MILLIAMPS_DEFAULT
+#endif
+
 static constexpr unsigned sumPinsRequired(const unsigned* current, size_t count) {
   return (count > 0) ? (Bus::getNumberOfPins(*current) + sumPinsRequired(current+1,count-1)) : 0;
 }
@@ -342,7 +353,7 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
       unsigned start = 0;
       // analog always has length 1
       if (Bus::isPWM(dataType) || Bus::isOnOff(dataType)) count = 1;
-      busConfigs.emplace_back(dataType, defPin, start, count, DEFAULT_LED_COLOR_ORDER, false, 0, RGBW_MODE_MANUAL_ONLY, 0, LED_MILLIAMPS_DEFAULT, ABL_MILLIAMPS_DEFAULT, 0); // driver=0 (RMT default)
+      busConfigs.emplace_back(dataType, defPin, start, count, DEFAULT_LED_COLOR_ORDER, false, 0, RGBW_MODE_MANUAL_ONLY, 0, DEFAULT_BUS_MILLIAMPS_PER_LED, ABL_MILLIAMPS_DEFAULT, 0); // driver=0 (RMT default)
       doInitBusses = true;  // finalization done in beginStrip()
     }
     #if defined(WLED_ENABLE_MBI5153MATRIX) && !defined(WLED_DISABLE_2D)

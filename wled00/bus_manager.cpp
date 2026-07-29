@@ -1321,8 +1321,14 @@ void BusMbi5153Matrix::setBrightness(uint8_t b) {
 }
 
 void BusMbi5153Matrix::estimateCurrent() {
-  // Mirrors BusDigital::estimateCurrent(); no white channel here, so always 3*255 units/channel.
-  _milliAmpsTotal = ((uint64_t)_colorSum * _milliAmpsPerLed) / (3*255) + getLength(); // +~1mA standby/pixel estimate
+  // Mirrors BusDigital::estimateCurrent() (no white channel here, so always 3*255 units/channel),
+  // deliberately WITHOUT its "+getLength()" standby-current term: that models one driver IC per
+  // LED (~1mA idle draw each for WS2812/WS2815), which does not apply here - this whole 6084-pixel
+  // panel is driven by only 20 MBI5153 ICs total (5 chained x 4 quarter-panel sections), whose
+  // combined standby draw is negligible next to LED current. Including it would have roughly
+  // doubled the estimate at the low per-pixel mA figures this panel actually has (see
+  // MBI5153_LED_MILLIAMPS_DEFAULT in platformio.ini for the derivation).
+  _milliAmpsTotal = ((uint64_t)_colorSum * _milliAmpsPerLed) / (3*255);
 }
 
 void BusMbi5153Matrix::applyBriLimit(uint8_t newBri) {

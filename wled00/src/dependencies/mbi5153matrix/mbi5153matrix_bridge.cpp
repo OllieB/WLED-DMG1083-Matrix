@@ -17,6 +17,19 @@ const uint8_t PINS[PIN_COUNT] = {
      // GPIO 9, already covered above via MBI_SRCLK.
 };
 
+#ifndef MBI5153_DRIVE_CURRENT
+// Hardware current-limit register (0-63, config reg1 bits[5:0], see BRIGHTNESS_* above) - a
+// fixed mechanical/thermal ceiling, not a dimmer. WLED's ABL (see BusMbi5153Matrix in
+// bus_manager.cpp) does the actual dynamic, content-aware current limiting against your real
+// PSU's rating - see MBI5153_LED_MILLIAMPS_DEFAULT in platformio.ini, which must be derived
+// against whatever level is configured here (they are coupled: this sets the true maximum the
+// panel can ever draw, ABL only ever dims down from it). BRIGHTNESS_HIGH gives ABL real headroom
+// (~5A rated) while staying inside the driver's own documented-safe range - only BRIGHTNESS_MAX
+// is flagged "gets very hot, use with caution". Override via platformio.ini build_flags, e.g.
+// -D MBI5153_DRIVE_CURRENT=BRIGHTNESS_MEDIUM, and update MBI5153_LED_MILLIAMPS_DEFAULT to match.
+#define MBI5153_DRIVE_CURRENT BRIGHTNESS_HIGH
+#endif
+
 namespace {
   Matrix matrix;
   bool began = false;
@@ -25,6 +38,7 @@ namespace {
 bool begin() {
   if (began) return true;
   matrix.initMatrix();
+  matrix.setBrightness(MBI5153_DRIVE_CURRENT);
   // WLED owns the authoritative frame state (it redraws every changed pixel each frame via its
   // own segment buffer) - keep the panel showing the last-pushed frame between updates rather
   // than having the driver clear it, matching how every other WLED bus type behaves.
