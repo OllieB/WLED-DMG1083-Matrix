@@ -1394,7 +1394,19 @@ std::vector<LEDType> BusMbi5153Matrix::getLEDTypes() {
 }
 
 size_t BusMbi5153Matrix::getPins(uint8_t* pinArray) const {
-  return 0; // fixed single-board pinout, nothing to report/configure
+  // Must report >=1 (matching Bus::getNumberOfPins()'s isMbi5153 case), even though there is
+  // nothing real to report - cfg.cpp's serializeConfig() writes this straight into cfg.json's
+  // "pin" array, and its deserializeConfig() loader treats an empty "pin" array as an invalid
+  // bus entry and silently skips it (cfg.cpp ~line 245: `if (pinArr.size() == 0) continue;`).
+  // Returning 0 here meant every cfg.json round-trip (anything that writes the config after the
+  // very first boot, e.g. saving WiFi credentials) would silently drop this bus on the next
+  // load - and since the JSON "ins" array itself still existed (just with the one entry
+  // skipped), the "no busses, use built-in defaults" fallback never kicked in either, leaving
+  // zero buses configured until a full factory reset wiped cfg.json entirely. The placeholder
+  // value below is never actually used - see the constructor, which allocates its real 22 GPIOs
+  // from Mbi5153Bridge::PINS, not from bc.pins.
+  if (pinArray) pinArray[0] = 255;
+  return 1;
 }
 #endif
 // ***************************************************************************
