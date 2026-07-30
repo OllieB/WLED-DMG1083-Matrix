@@ -313,6 +313,9 @@
 						gId("p2d"+n).innerHTML = "<br>No. of Panels:";
 						gId("p3d"+n).innerText = "rows x cols:";
 						break;
+					case 'M': // MBI5153 matrix - fixed, hardcoded pinout (see mbi5153matrix_bridge.h),
+						p0d = "";  // nothing to configure here at all, unlike HUB75's panel-geometry fields
+						break;
 				}
 				gId("p0d"+n).innerText = p0d;
 				gId("p1d"+n).innerText = p1d;
@@ -324,6 +327,16 @@
 					if (!el) continue;
 					if (isVir(t) || isHub75(t)) {
 						if (el.tagName === "SELECT") unmakePinSelect(nm2); // see common.js
+					} else if (isMbi5153(t)) {
+						// L0 has no dynamic show/hide/required handling elsewhere (unlike L1-L4,
+						// see the pins-count loop below) since every other type needs at least one
+						// real GPIO. This type needs none - convert away from a pin <select> (which
+						// would otherwise be a *required* field with no valid GPIO to pick, silently
+						// blocking Save) and hide it outright.
+						if (el.tagName === "SELECT") unmakePinSelect(nm2);
+						el = d.Sf[nm2]; // unmakePinSelect() replaces the element - re-fetch
+						el.required = false;
+						el.style.display = "none";
 					} else {
 						if (el.tagName === "INPUT" && el.type === "number") {
 							makePinSelect(nm2, 1); // see common.js
@@ -331,6 +344,7 @@
 						}
 					}
 				}
+				if (isMbi5153(t)) gId("p0d"+n).style.display = "none"; // hide the now-empty "GPIO:" label too
 				// show/hide secondary pins on whatever element type now exists
 				let pins = Math.max(gT(t).t.length,1) + 3*isNet(t) + 4*isHub75(t);
 				for (let p=1; p<5; p++) {
