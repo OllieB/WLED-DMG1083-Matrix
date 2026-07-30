@@ -1677,7 +1677,13 @@ void BusManager::initializeABL() {
           uint32_t busDemand = busLength * busm.getLEDCurrent();
           uint32_t busMax    = busm.getMaxCurrent();
           if (busMax > ESPshare)  busMax -= ESPshare;
-          if (busMax < busLength) busMax  = busLength;
+          // Deliberately no "if (busMax < busLength) busMax = busLength;" floor here (unlike the
+          // isDigital() branch above) - same reasoning as applyABL()'s totalLEDs skip: that floor
+          // assumes ~1mA/LED real standby draw (one driver IC per LED), which doesn't apply to
+          // this panel's 20-IC multiplexed design. Flooring busMax to busLength (6084) here would
+          // force the per-output PSU-mA field up to 6084mA minimum regardless of what's actually
+          // configured, same class of bug as the totalLEDs one - just in the per-output-limiter
+          // path (_gMilliAmpsMax==0) instead of the global one.
           if (busDemand == 0) busMax = 0;
           busm.setCurrentLimit(busMax);
         }
@@ -1707,7 +1713,14 @@ void BusManager::applyABL() {
         if (_gMilliAmpsMax == 0)
           busm.applyBriLimit(0);
         milliAmpsSum += busm.getUsedCurrent();
-        totalLEDs += busm.getLength();
+        // Deliberately NOT contributing to totalLEDs (unlike the isDigital() branch above): that
+        // variable is used below purely as a "budget >= ~1mA/LED standby floor" sanity check,
+        // which assumes one driver IC per LED (true for WS2812/WS2815, ~1mA idle draw each).
+        // This panel has only 20 MBI5153 ICs total for all 6084 pixels, so there's no comparable
+        // per-pixel standby requirement. Counting getLength() here made globalMax(730 at WLED's
+        // factory-default 850mA "Maximum PSU Current") > totalLEDs(6084) always false, forcing
+        // the newBri=1 "budget far too low" fallback below on every frame - i.e. no visible
+        // output regardless of the real (much lower) estimated current from estimateCurrent().
       }
 #endif
     }
