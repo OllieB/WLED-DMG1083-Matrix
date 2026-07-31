@@ -57,4 +57,12 @@ void show() {
   matrix.update();
 }
 
+uint8_t correctBrightness(uint8_t v) {
+  return Matrix::correctBrightness(v); // pure lookup table, no hardware/began dependency
+}
+
+uint8_t inverseCorrectBrightness(uint8_t targetCieValue) {
+  return Matrix::inverseCorrectBrightness(targetCieValue); // pure lookup table, no hardware/began dependency
+}
+
 } // namespace Mbi5153Bridge

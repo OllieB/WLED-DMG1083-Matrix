@@ -35,4 +35,16 @@ namespace Mbi5153Bridge {
   // data actually changed.
   void show();
 
+  // Applies the same CIE1931 perceptual-brightness curve mbi_set_pixel() applies before writing
+  // to hardware. WLED's ABL current estimate (BusMbi5153Matrix::estimateCurrent() in
+  // bus_manager.cpp) needs this to correct a value BEFORE accumulating it, since actual current
+  // draw is proportional to the CIE-corrected value, not the raw 8-bit one - see
+  // Matrix::correctBrightness()'s comment for why.
+  uint8_t correctBrightness(uint8_t v);
+
+  // Inverse of correctBrightness() - see Matrix::inverseCorrectBrightness()'s comment. Needed by
+  // BusMbi5153Matrix::applyBriLimit() to turn ABL's linear current-budget scale factor into the
+  // actual brightness value that achieves it once the hardware's own CIE curve is applied.
+  uint8_t inverseCorrectBrightness(uint8_t targetCieValue);
+
 } // namespace Mbi5153Bridge

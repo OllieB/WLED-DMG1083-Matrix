@@ -57,6 +57,25 @@ class Matrix : public GFX {
   // Pack 8-bit RGB into the 16-bit 565 format used by the uint16_t drawPixel()/fill*() overloads.
   static uint16_t color(uint8_t r, uint8_t g, uint8_t b);
 
+  // Exposes the same CIE1931 perceptual-brightness lookup table mbi_set_pixel() applies
+  // internally before writing to hardware. WLED's ABL current estimate (see
+  // Mbi5153Bridge::correctBrightness()/BusMbi5153Matrix::estimateCurrent() in bus_manager.cpp)
+  // needs this too: it assumes brightness scales linearly with actual current draw, which is
+  // only true against the CIE-corrected value, not the raw 8-bit one - the curve compresses low
+  // values well below linear, so estimating from raw values under-predicts how much ABL needs to
+  // scale down at low brightness.
+  static uint8_t correctBrightness(uint8_t v);
+
+  // Inverse of correctBrightness(): the largest v (0-255) such that correctBrightness(v) <=
+  // targetCieValue (CIE[] is monotonic non-decreasing, so this is well-defined; rounds toward a
+  // dimmer result rather than an exact match when there's no exact hit, to stay at/under a
+  // current budget rather than risk exceeding it). Needed by BusMbi5153Matrix::applyBriLimit():
+  // ABL computes its brightness scale as a *linear* fraction of a current budget, but this
+  // panel's hardware applies the CIE curve on top of whatever 8-bit value it's given - a linear
+  // scale factor doesn't produce a linear fraction of rated current, so the target has to be
+  // pushed back through the inverse curve to find the value that actually achieves it.
+  static uint8_t inverseCorrectBrightness(uint8_t targetCieValue);
+
  protected:
   bool initialized = false;
   uint8_t currentLevel = BRIGHTNESS_MIN;  // LED drive current, see setBrightness()

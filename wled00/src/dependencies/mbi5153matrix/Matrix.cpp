@@ -199,6 +199,21 @@ uint16_t Matrix::color(uint8_t r, uint8_t g, uint8_t b) {
   return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
 }
 
+uint8_t Matrix::correctBrightness(uint8_t v) {
+  return (uint8_t)CIE[v]; // same table mbi_set_pixel() already applies per-channel; all entries fit uint8_t
+}
+
+uint8_t Matrix::inverseCorrectBrightness(uint8_t targetCieValue) {
+  // Binary search CIE[] (monotonic non-decreasing) for the largest v with CIE[v] <= targetCieValue.
+  int lo = 0, hi = 255, best = 0;
+  while (lo <= hi) {
+    int mid = (lo + hi) / 2;
+    if ((uint8_t)CIE[mid] <= targetCieValue) { best = mid; lo = mid + 1; }
+    else hi = mid - 1;
+  }
+  return (uint8_t)best;
+}
+
 void Matrix::mbi_update_frame(bool configure_latches) {
   int counter = 0;
   for (int row = 0; row < PANEL_SCAN_LINES; row++) {

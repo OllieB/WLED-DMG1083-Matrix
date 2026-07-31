@@ -1288,7 +1288,14 @@ void IRAM_ATTR BusMbi5153Matrix::setPixelColor(unsigned pix, uint32_t c) {
   c = color_fade(c, _bri, true); // apply WLED's global brightness (BusDigital does this in its own setPixelColor() too)
   uint8_t r = R(c), g = G(c), b = B(c);
 
-  if (BusManager::_useABL) { _colorSumR += r; _colorSumG += g; _colorSumB += b; } // fed to estimateCurrent() once per frame, see BusManager::applyABL()
+  if (BusManager::_useABL) {
+    // CIE-correct before accumulating: actual current is proportional to what the hardware's own
+    // CIE1931 curve maps r/g/b to, not the raw values - matters whenever _bri < 255 (global
+    // brightness slider below max). At _bri==255 this is a no-op (CIE[255]==255).
+    _colorSumR += Mbi5153Bridge::correctBrightness(r);
+    _colorSumG += Mbi5153Bridge::correctBrightness(g);
+    _colorSumB += Mbi5153Bridge::correctBrightness(b);
+  } // fed to estimateCurrent() once per frame, see BusManager::applyABL()
 
   bool nonBlack = (r || g || b);
   if (!nonBlack && getBitFromArray(_ledsDirty, pix) == false) return; // ignore black if pixel is already black
@@ -1345,6 +1352,14 @@ void BusMbi5153Matrix::estimateCurrent() {
   // current per unit - see MBI5153_MA_FULL_RED/GREEN/BLUE above. Each channel's summed brightness
   // (0..getLength()*255) is scaled against what the WHOLE PANEL would draw with every pixel at
   // that channel's max, then the three are added.
+  // Note on combined-channel colors (e.g. white): summing three independent per-channel terms
+  // assumes they draw current additively, which real hardware measurement shows is NOT quite
+  // true - full white measured 2.75A unthrottled, while this formula's R+G+B sum (2000+1050+970)
+  // predicts 4.02A, a substantial overestimate. That's the safe direction (ABL ends up more
+  // conservative than strictly necessary for saturated multi-channel colors, never less), and
+  // fixing it precisely would need characterizing more of the R/G/B interaction space than one
+  // data point (pure white) supports - risking an UNDER-estimate for some untested color
+  // combination is worse than leaving some brightness headroom unused. Left as the simple sum.
   uint32_t denom = (uint32_t)getLength() * 255;
   _milliAmpsTotal = denom ? (uint64_t)_colorSumR * MBI5153_MA_FULL_RED   / denom
                           + (uint64_t)_colorSumG * MBI5153_MA_FULL_GREEN / denom
@@ -1367,9 +1382,26 @@ void BusMbi5153Matrix::applyBriLimit(uint8_t newBri) {
     // below regardless of what the real (now per-channel-weighted) estimate says.
     newBri = 255;
     if (_milliAmpsTotal > _milliAmpsLimit) {
-      newBri = ((uint32_t)_milliAmpsLimit * 255) / _milliAmpsTotal + 1; // +1 to avoid 0 brightness
+      // Target fraction of rated current, as a linear 0-255 value - same shape as BusDigital's
+      // formula, but this is NOT the final brightness value to use (see below).
+      uint32_t targetFraction = ((uint32_t)_milliAmpsLimit * 255) / _milliAmpsTotal;
+      if (targetFraction > 255) targetFraction = 255;
+      newBri = Mbi5153Bridge::inverseCorrectBrightness((uint8_t)targetFraction);
+      if (newBri == 0) newBri = 1; // avoid 0 brightness, same intent as BusDigital's "+1"
       _milliAmpsTotal = _milliAmpsLimit;
     }
+  } else if (newBri < 255) {
+    // newBri came from BusManager::applyABL()'s shared global-budget computation
+    // (globalMax*255/milliAmpsSum) - a linear target fraction, correct as-is for buses like
+    // BusDigital where brightness scales linearly with current. This panel's hardware applies
+    // its own CIE1931 gamma curve to whatever 8-bit value it's told to display (see
+    // Matrix::mbi_set_pixel()), so a linear target has to be pushed back through the inverse of
+    // that curve to find the brightness value that actually delivers it - otherwise the panel
+    // ends up noticeably dimmer than the configured budget allows, worse the harder ABL needs to
+    // scale down (confirmed against real measurements: linear scaling under-delivered by up to
+    // ~55% of budget at aggressive scale-down; barely off when scaling was minimal).
+    newBri = Mbi5153Bridge::inverseCorrectBrightness(newBri);
+    if (newBri == 0) newBri = 1;
   }
   _NPBbri = newBri;
   _colorSumR = _colorSumG = _colorSumB = 0; // reset for next frame
