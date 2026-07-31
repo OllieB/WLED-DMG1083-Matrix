@@ -1324,14 +1324,17 @@ void BusMbi5153Matrix::setBrightness(uint8_t b) {
 // Full-panel current (mA) with every pixel at full RED/GREEN/BLUE respectively, measured on real
 // hardware at whatever MBI5153_DRIVE_CURRENT level is actually flashed (see
 // mbi5153matrix_bridge.cpp) - NOT a datasheet figure, and NOT interchangeable with a single
-// "mA per LED" rate: red draws meaningfully more than green or blue on this panel (measured
-// 2.3A/1.3A/1.2A at BRIGHTNESS_HIGH), so estimateCurrent() below weights each channel separately
-// instead of assuming they cost the same. Override via platformio.ini build_flags if you change
-// MBI5153_DRIVE_CURRENT or re-measure on different hardware - these three must be re-measured
-// together, they don't scale from one another.
-#define MBI5153_MA_FULL_RED   2300
-#define MBI5153_MA_FULL_GREEN 1300
-#define MBI5153_MA_FULL_BLUE  1200
+// "mA per LED" rate: red draws meaningfully more than green or blue on this panel, so
+// estimateCurrent() below weights each channel separately instead of assuming they cost the same.
+// Values below are 2.0A/1.05A/0.97A at BRIGHTNESS_HIGH, confirmed by two independent unthrottled
+// measurements (ABL disabled) that agreed closely - an earlier first-pass measurement (2.3/1.3/
+// 1.2A) turned out to be unreliable and was superseded; if you re-measure, prefer ABL disabled so
+// you're reading the panel's true max, not something already being scaled down.
+// Override via platformio.ini build_flags if you change MBI5153_DRIVE_CURRENT or re-measure on
+// different hardware - these three must be re-measured together, they don't scale from one another.
+#define MBI5153_MA_FULL_RED   2000
+#define MBI5153_MA_FULL_GREEN 1050
+#define MBI5153_MA_FULL_BLUE  970
 #endif
 
 void BusMbi5153Matrix::estimateCurrent() {
