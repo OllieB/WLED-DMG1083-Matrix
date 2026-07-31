@@ -362,17 +362,18 @@ bool deserializeConfig(JsonObject doc, bool fromFS) {
     // Configuration" pass in the UI. 78 = the DMG1083's physical resolution (PANEL_PHY_RES_X/Y
     // in mbi5153matrix/app_constants.hpp) - kept as a literal here rather than pulling that
     // driver header into cfg.cpp.
-    // bottomStart/rightStart/vertical=true confirmed against real hardware - the panel's actual
-    // wiring does NOT match BusMbi5153Matrix::setPixelColor's raster formula (x = pix % width,
-    // y = pix / width) read naively as top-left/left-to-right/top-to-bottom; that assumption
-    // was wrong (this comment previously claimed all-false/no overrides needed).
+    // bottomStart/vertical=true, rightStart=false confirmed against real hardware - the panel's
+    // actual wiring does NOT match BusMbi5153Matrix::setPixelColor's raster formula (x = pix %
+    // width, y = pix / width) read naively as top-left/left-to-right/top-to-bottom; that
+    // assumption was wrong (this comment previously claimed all-false/no overrides needed).
+    // Origin is bottom-LEFT, not bottom-right - an earlier pass at this got rightStart backwards.
     strip.isMatrix = true;
     strip.panel.clear();
     WS2812FX::Panel p;
     p.width       = 78;
     p.height      = 78;
     p.bottomStart = true;
-    p.rightStart  = true;
+    p.rightStart  = false;
     p.vertical    = true;
     strip.panel.push_back(p);
     // setUpMatrix() is not called here (same reason as the JSON-driven path above: WLED::beginStrip()
