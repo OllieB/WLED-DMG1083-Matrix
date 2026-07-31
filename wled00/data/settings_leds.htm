@@ -91,6 +91,8 @@
 				}
 				// ignore IP address
 			  if (isNet(t)) return;
+				// fixed, hardcoded pinout - no GPIO to assign, same reasoning as isHub75(t) above
+				if (isMbi5153(t)) return;
 				// LED pin(s) must be assigned for non-virtual types
 				let pIdx = parseInt(LC.name.charAt(1)); // determine pin index (0 for L0, 1 for L1, etc.)
 				if (pIdx < numPins(t) && !isVir(t) && (LC.value === "" || LC.value === "-1")) {
