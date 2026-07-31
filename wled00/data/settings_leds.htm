@@ -842,7 +842,13 @@ Swap: <select id="xw${s}" name="XW${s}">
 			d.Sf.querySelectorAll(".iST input.s[name^=L], .iST select.pin[name^=L]").forEach((e) => {
 				let n = e.name.substring(2, 3);
 				let t = parseInt(d.Sf["LT"+n].value, 10);
-				if (!isVir(t) && !isHub75(t)) makePinSelect(e.name, 1);
+				// This is a separate, one-time pass that runs once d.pinsData resolves - after the
+				// initial UI() call already hid/converted these fields for isMbi5153(t) (see
+				// setPinConfig() above). Without this check it unconditionally rebuilds them back
+				// into visible "unused" pin selects, which then only got hidden again the next time
+				// UI() ran (e.g. on editing any other field) - hence fields that appeared on load
+				// but vanished once you started editing something.
+				if (!isVir(t) && !isHub75(t) && !isMbi5153(t)) makePinSelect(e.name, 1);
 			});
 			// IR (any pin including input-only)
 			let irSel = makePinSelect("IR", 0);
@@ -876,7 +882,7 @@ Swap: <select id="xw${s}" name="XW${s}">
 				let busN = i.name.substring(2, 3);
 				let t = parseInt(d.Sf["LT"+busN].value, 10);
 				let p = parseInt(i.name.charAt(1), 10);
-				if (isVir(t) || isHub75(t) || p >= numPins(t)) return;
+				if (isVir(t) || isHub75(t) || isMbi5153(t) || p >= numPins(t)) return;
 				if (i.value !== "" && parseInt(i.value, 10) >= 0) pins.push(i.value);
 			});
 			// collect LED bus pin values from selects
