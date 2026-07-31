@@ -1288,7 +1288,7 @@ void IRAM_ATTR BusMbi5153Matrix::setPixelColor(unsigned pix, uint32_t c) {
   c = color_fade(c, _bri, true); // apply WLED's global brightness (BusDigital does this in its own setPixelColor() too)
   uint8_t r = R(c), g = G(c), b = B(c);
 
-  if (BusManager::_useABL) _colorSum += r + g + b; // fed to estimateCurrent() once per frame, see BusManager::applyABL()
+  if (BusManager::_useABL) { _colorSumR += r; _colorSumG += g; _colorSumB += b; } // fed to estimateCurrent() once per frame, see BusManager::applyABL()
 
   bool nonBlack = (r || g || b);
   if (!nonBlack && getBitFromArray(_ledsDirty, pix) == false) return; // ignore black if pixel is already black
@@ -1320,15 +1320,33 @@ void BusMbi5153Matrix::setBrightness(uint8_t b) {
   // applyBriLimit() and BusManager::applyABL().
 }
 
+#ifndef MBI5153_MA_FULL_RED
+// Full-panel current (mA) with every pixel at full RED/GREEN/BLUE respectively, measured on real
+// hardware at whatever MBI5153_DRIVE_CURRENT level is actually flashed (see
+// mbi5153matrix_bridge.cpp) - NOT a datasheet figure, and NOT interchangeable with a single
+// "mA per LED" rate: red draws meaningfully more than green or blue on this panel (measured
+// 2.3A/1.3A/1.2A at BRIGHTNESS_HIGH), so estimateCurrent() below weights each channel separately
+// instead of assuming they cost the same. Override via platformio.ini build_flags if you change
+// MBI5153_DRIVE_CURRENT or re-measure on different hardware - these three must be re-measured
+// together, they don't scale from one another.
+#define MBI5153_MA_FULL_RED   2300
+#define MBI5153_MA_FULL_GREEN 1300
+#define MBI5153_MA_FULL_BLUE  1200
+#endif
+
 void BusMbi5153Matrix::estimateCurrent() {
-  // Mirrors BusDigital::estimateCurrent() (no white channel here, so always 3*255 units/channel),
-  // deliberately WITHOUT its "+getLength()" standby-current term: that models one driver IC per
-  // LED (~1mA idle draw each for WS2812/WS2815), which does not apply here - this whole 6084-pixel
-  // panel is driven by only 20 MBI5153 ICs total (5 chained x 4 quarter-panel sections), whose
-  // combined standby draw is negligible next to LED current. Including it would have roughly
-  // doubled the estimate at the low per-pixel mA figures this panel actually has (see
-  // MBI5153_LED_MILLIAMPS_DEFAULT in platformio.ini for the derivation).
-  _milliAmpsTotal = ((uint64_t)_colorSum * _milliAmpsPerLed) / (3*255);
+  // Deliberately not using BusDigital's model (a single mA/LED rate applied uniformly to
+  // R+G+B, plus a "+getLength()" per-pixel standby term): neither assumption holds here. There's
+  // no meaningful per-pixel standby term (only 20 MBI5153 ICs drive all 6084 pixels, unlike
+  // WS2812/WS2815's one-IC-per-LED ~1mA idle draw), and the three channels do NOT cost the same
+  // current per unit - see MBI5153_MA_FULL_RED/GREEN/BLUE above. Each channel's summed brightness
+  // (0..getLength()*255) is scaled against what the WHOLE PANEL would draw with every pixel at
+  // that channel's max, then the three are added.
+  uint32_t denom = (uint32_t)getLength() * 255;
+  _milliAmpsTotal = denom ? (uint64_t)_colorSumR * MBI5153_MA_FULL_RED   / denom
+                          + (uint64_t)_colorSumG * MBI5153_MA_FULL_GREEN / denom
+                          + (uint64_t)_colorSumB * MBI5153_MA_FULL_BLUE  / denom
+                          : 0;
 }
 
 void BusMbi5153Matrix::applyBriLimit(uint8_t newBri) {
@@ -1337,20 +1355,21 @@ void BusMbi5153Matrix::applyBriLimit(uint8_t newBri) {
   // against the buffered colors, rather than rewriting an already-pushed hardware buffer in place.
   _NPBbri = 255;
   if (newBri == 0) {
-    if (_milliAmpsLimit == 0 || _milliAmpsTotal == 0) { _colorSum = 0; return; } // ABL not used for this bus
+    if (_milliAmpsLimit == 0 || _milliAmpsTotal == 0) { _colorSumR = _colorSumG = _colorSumB = 0; return; } // ABL not used for this bus
+    // Deliberately no "if (_milliAmpsLimit > getLength())" floor here, unlike BusDigital's
+    // equivalent check - same reasoning as the totalLEDs/busMax fixes in BusManager::applyABL()/
+    // initializeABL(): that's a "budget >= ~1mA/pixel standby" sanity floor that assumes one
+    // driver IC per LED, which this panel doesn't have. A real, much lower per-bus PSU budget
+    // (e.g. 2000mA against 6084 "pixels") would otherwise always trip the newBri=1 panic branch
+    // below regardless of what the real (now per-channel-weighted) estimate says.
     newBri = 255;
-    if (_milliAmpsLimit > getLength()) { // each pixel uses about 1mA in standby, per estimateCurrent()
-      if (_milliAmpsTotal > _milliAmpsLimit) {
-        newBri = ((uint32_t)_milliAmpsLimit * 255) / _milliAmpsTotal + 1; // +1 to avoid 0 brightness
-        _milliAmpsTotal = _milliAmpsLimit;
-      }
-    } else {
-      newBri = 1; // limit too low, set brightness to minimum
-      _milliAmpsTotal = getLength(); // estimate bus current as minimum
+    if (_milliAmpsTotal > _milliAmpsLimit) {
+      newBri = ((uint32_t)_milliAmpsLimit * 255) / _milliAmpsTotal + 1; // +1 to avoid 0 brightness
+      _milliAmpsTotal = _milliAmpsLimit;
     }
   }
   _NPBbri = newBri;
-  _colorSum = 0; // reset for next frame
+  _colorSumR = _colorSumG = _colorSumB = 0; // reset for next frame
 }
 
 void BusMbi5153Matrix::show() {

@@ -486,7 +486,7 @@ class BusMbi5153Matrix : public Bus {
     // matrix-type hook to reuse. These mirror BusDigital's own (non-virtual, plain-method) ABL
     // interface exactly so BusManager can grow parallel isMbi5153()+static_cast branches instead
     // of restructuring Bus's virtual interface for one bus type.
-    void     estimateCurrent(); // sums _colorSum (already _bri-scaled, see setPixelColor) into _milliAmpsTotal
+    void     estimateCurrent(); // combines per-channel sums (already _bri-scaled, see setPixelColor) into _milliAmpsTotal
     void     applyBriLimit(uint8_t newBri); // 0 = compute per-bus limit from _milliAmpsLimit; else apply given global ABL scale
     void     setCurrentLimit(uint16_t milliAmps) { _milliAmpsLimit = milliAmps; }
     uint16_t getLEDCurrent()  const override { return _milliAmpsPerLed; }
@@ -516,9 +516,19 @@ class BusMbi5153Matrix : public Bus {
     // immediately, and show() applies the final ABL-decided scale (_NPBbri) to the whole buffer
     // in one pass right before actually pushing pixels out - see setPixelColor()/show().
     uint8_t  *_rgb = nullptr;             // _len * 3 bytes, RGB per pixel
-    uint32_t  _colorSum = 0;              // running per-frame sum of R+G+B, reset in applyBriLimit()
+    // Separate per-channel sums, not one combined R+G+B sum: measured on real hardware, full red/
+    // green/blue draw meaningfully different current (2.3A/1.3A/1.2A at BRIGHTNESS_HIGH on the
+    // 78x78 panel) - a single blended mA/pixel rate can't represent that asymmetry, and using one
+    // let full red exceed a configured PSU budget while ABL thought it was within bounds. Reset in
+    // applyBriLimit(). See estimateCurrent() for how these combine with MBI5153_MA_FULL_RED/GREEN/BLUE.
+    uint32_t  _colorSumR = 0, _colorSumG = 0, _colorSumB = 0;
     uint32_t  _milliAmpsTotal = 0;        // current-frame estimated current draw, set by estimateCurrent()
     uint16_t  _milliAmpsLimit = 0;        // per-bus ABL budget, set by BusManager::initializeABL(); 0 = ABL disabled for this bus
+    // NOT used as a real mA/pixel rate (see estimateCurrent(), which uses the per-channel
+    // MBI5153_MA_FULL_* constants instead) - this only gates whether ABL is active for this bus at
+    // all (getLEDCurrent() > 0), matching how BusManager's ABL code decides that for every bus type
+    // ("to disable brightness limiter for a bus, set LED current to 0", bus_manager.cpp). The UI's
+    // "mA/LED" field still writes this value; just don't expect it to affect the actual estimate.
     uint8_t   _milliAmpsPerLed = LED_MILLIAMPS_DEFAULT; // from BusConfig::milliAmpsPerLed (UI: "mA/LED")
     uint16_t  _milliAmpsMax = ABL_MILLIAMPS_DEFAULT;    // from BusConfig::milliAmpsMax (UI: "PSU mA")
 };
