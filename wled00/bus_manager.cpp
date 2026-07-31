@@ -1328,37 +1328,42 @@ void BusMbi5153Matrix::setBrightness(uint8_t b) {
 }
 
 #ifndef MBI5153_MA_FULL_RED
-// Full-panel current (mA) with every pixel at full RED/GREEN/BLUE respectively, measured on real
-// hardware at whatever MBI5153_DRIVE_CURRENT level is actually flashed (see
-// mbi5153matrix_bridge.cpp) - NOT a datasheet figure, and NOT interchangeable with a single
-// "mA per LED" rate: red draws meaningfully more than green or blue on this panel, so
-// estimateCurrent() below weights each channel separately instead of assuming they cost the same.
-// Values below are 2.0A/1.05A/0.97A at BRIGHTNESS_HIGH, confirmed by two independent unthrottled
-// measurements (ABL disabled) that agreed closely - an earlier first-pass measurement (2.3/1.3/
-// 1.2A) turned out to be unreliable and was superseded; if you re-measure, prefer ABL disabled so
-// you're reading the panel's true max, not something already being scaled down.
+// LED-ONLY full-panel current (mA) with every pixel at full RED/GREEN/BLUE respectively - i.e.
+// the scaling portion, with the fixed ESP32-S3 + idling-panel baseline (~500mA, measured with
+// nothing lit - the 20 MBI5153 ICs, background GCLK/address SPI-DMA loop, etc. draw current
+// continuously regardless of what's displayed) already subtracted out. That baseline is NOT
+// negligible on this panel (unlike a per-pixel-IC assumption, which really would be negligible
+// here) - it's handled separately, reserved out of the configured PSU budget via MA_FOR_ESP in
+// platformio.ini, so it must NOT also be baked into these per-channel figures, or it gets
+// double-counted (once reserved from the budget, again inflating what LEDs are estimated to
+// cost). Raw unthrottled measurements (total, ABL disabled) were 2000/1050/970mA - the values
+// below are those minus the ~500mA baseline. Measured at BRIGHTNESS_HIGH (MBI5153_DRIVE_CURRENT).
 // Override via platformio.ini build_flags if you change MBI5153_DRIVE_CURRENT or re-measure on
-// different hardware - these three must be re-measured together, they don't scale from one another.
-#define MBI5153_MA_FULL_RED   2000
-#define MBI5153_MA_FULL_GREEN 1050
-#define MBI5153_MA_FULL_BLUE  970
+// different hardware - re-measure MA_FOR_ESP (platformio.ini) at the same time and subtract it
+// the same way, these three don't scale from one another or from MA_FOR_ESP.
+#define MBI5153_MA_FULL_RED   1500
+#define MBI5153_MA_FULL_GREEN 550
+#define MBI5153_MA_FULL_BLUE  470
 #endif
 
 void BusMbi5153Matrix::estimateCurrent() {
-  // Deliberately not using BusDigital's model (a single mA/LED rate applied uniformly to
-  // R+G+B, plus a "+getLength()" per-pixel standby term): neither assumption holds here. There's
-  // no meaningful per-pixel standby term (only 20 MBI5153 ICs drive all 6084 pixels, unlike
-  // WS2812/WS2815's one-IC-per-LED ~1mA idle draw), and the three channels do NOT cost the same
-  // current per unit - see MBI5153_MA_FULL_RED/GREEN/BLUE above. Each channel's summed brightness
-  // (0..getLength()*255) is scaled against what the WHOLE PANEL would draw with every pixel at
-  // that channel's max, then the three are added.
+  // Deliberately not using BusDigital's model (a single mA/LED rate applied uniformly to R+G+B,
+  // plus a "+getLength()" per-pixel standby term): a per-pixel standby term genuinely doesn't
+  // apply here (only 20 MBI5153 ICs drive all 6084 pixels, unlike WS2812/WS2815's one-IC-per-LED
+  // ~1mA idle draw) - but the panel's FIXED (non-per-pixel) idle baseline is real and substantial
+  // (~500mA), just handled on the budget side via MA_FOR_ESP instead of added here - see
+  // MBI5153_MA_FULL_RED/GREEN/BLUE above for why it must not appear in both places. The three
+  // channels also do NOT cost the same current per unit, so each is weighted separately instead
+  // of assuming they're equal. Each channel's summed brightness (0..getLength()*255) is scaled
+  // against what the WHOLE PANEL would draw with every pixel at that channel's max, then the
+  // three are added.
   // Note on combined-channel colors (e.g. white): summing three independent per-channel terms
   // assumes they draw current additively, which real hardware measurement shows is NOT quite
-  // true - full white measured 2.75A unthrottled, while this formula's R+G+B sum (2000+1050+970)
-  // predicts 4.02A, a substantial overestimate. That's the safe direction (ABL ends up more
-  // conservative than strictly necessary for saturated multi-channel colors, never less), and
-  // fixing it precisely would need characterizing more of the R/G/B interaction space than one
-  // data point (pure white) supports - risking an UNDER-estimate for some untested color
+  // true - full white measured 2250mA LED-only (2750mA raw minus the ~500mA baseline), while this
+  // formula's R+G+B sum (1500+550+470=2520mA) overestimates it. That's the safe direction (ABL
+  // ends up more conservative than strictly necessary for saturated multi-channel colors, never
+  // less), and fixing it precisely would need characterizing more of the R/G/B interaction space
+  // than one data point (pure white) supports - risking an UNDER-estimate for some untested color
   // combination is worse than leaving some brightness headroom unused. Left as the simple sum.
   uint32_t denom = (uint32_t)getLength() * 255;
   _milliAmpsTotal = denom ? (uint64_t)_colorSumR * MBI5153_MA_FULL_RED   / denom
