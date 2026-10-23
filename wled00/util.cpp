@@ -262,6 +262,13 @@ size_t utf8_strlen(const char *s)
   return len;
 }
 
+// Runtime state private to this file - previously WLED_GLOBAL, a leftover from
+// when all state lived in one big extern block regardless of who used it.
+#if defined(ARDUINO_ARCH_ESP32)
+static SemaphoreHandle_t jsonBufferLockMutex = xSemaphoreCreateRecursiveMutex();
+#endif
+static volatile uint8_t jsonBufferLock = 0;
+
 //threading/network callback details: https://github.com/wled-dev/WLED/pull/2336#discussion_r762276994
 bool requestJSONBufferLock(uint8_t moduleID)
 {
@@ -920,8 +927,8 @@ void *allocate_buffer(size_t size, uint32_t type) {
   buffer = d_malloc(size);
   #else
   if (type & BFRALLOC_PREFER_DRAM) {
-    if (getContiguousFreeHeap() < 3*(MIN_HEAP_SIZE/2) + size && size > PSRAM_THRESHOLD)
-      buffer = p_malloc(size); // prefer PSRAM for large allocations & when DRAM is low
+    if ((getContiguousFreeHeap() < 3*(MIN_HEAP_SIZE/2) + size && size > PSRAM_THRESHOLD) || size > 2*PSRAM_THRESHOLD)
+      buffer = p_malloc(size); // prefer PSRAM for large allocations & when DRAM is low or when buffer is huge
     else
       buffer = d_malloc(size); // allocate in DRAM if enough free heap is available, PSRAM as fallback
   }
